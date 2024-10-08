@@ -136,14 +136,12 @@ async def process_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         original_transcription = transcribe_audio(temp_file_path)
         improved_transcription = improve_transcription(original_transcription)
 
-        await update.message.reply_text("Improved Transcription:")
         for part in split_message(improved_transcription):
             await update.message.reply_text(part, do_quote=True)
 
         summary = generate_summary(improved_transcription)
-        await update.message.reply_text("Summary:")
         for part in split_message(summary):
-            update.message.reply_text(part, do_quote=True)
+            await update.message.reply_text(part, do_quote=True)
 
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {str(e)}")
