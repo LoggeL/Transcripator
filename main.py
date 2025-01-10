@@ -68,7 +68,7 @@ def improve_transcription(transcription: str) -> str:
     """
 
     completion = groq_client.chat.completions.create(
-        model="llama-3.1-70b-versatile",
+        model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
     )
@@ -94,9 +94,9 @@ def generate_summary(transcription: str) -> str:
     """
 
     completion = groq_client.chat.completions.create(
-        model="llama-3.1-70b-versatile",
+        model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
+        temperature=0.5,
     )
 
     return completion.choices[0].message.content
