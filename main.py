@@ -86,9 +86,9 @@ def generate_summary(transcription: str) -> str:
     3. Write from the perspective of the transcript
     4. Capture the key ideas and any important details
     5. Ensure the summary is coherent and easy to understand
-    6. Make sure the summary is in the language of the transcript.
-    ONLY RETURN THE SUMMARY.
-
+    6. Use the same language that is used in the transcript (english, german, spanish, ...).
+    7. ONLY RETURN THE SUMMARY.
+    
     Transcription:
     {transcription}
 
