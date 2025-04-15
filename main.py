@@ -68,7 +68,7 @@ def improve_transcription(transcription: str) -> str:
     """
 
     completion = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="meta-llama/llama-4-maverick-17b-128e-instruct",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
     )
@@ -86,6 +86,7 @@ def generate_summary(transcription: str) -> str:
     3. Write from the perspective of the transcript
     4. Capture the key ideas and any important details
     5. Ensure the summary is coherent and easy to understand
+    ONLY RETURN THE SUMMARY.
 
     Transcription:
     {transcription}
@@ -94,7 +95,7 @@ def generate_summary(transcription: str) -> str:
     """
 
     completion = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="meta-llama/llama-4-maverick-17b-128e-instruct",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.5,
     )
