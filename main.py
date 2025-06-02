@@ -1,5 +1,6 @@
 import os
 import tempfile
+import requests # Added requests import
 from typing import Union
 from telegram import Update
 from telegram.ext import (
@@ -9,14 +10,10 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
-from groq import Groq
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
-
-# Initialize Groq client
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 # Telegram bot token
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -24,6 +21,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 # Constants
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB in bytes
 MAX_MESSAGE_LENGTH = 4096
+CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
+CEREBRAS_MODEL = "llama-4-scout-17b-16e-instruct"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -39,69 +38,92 @@ def split_message(message: str, max_length: int = MAX_MESSAGE_LENGTH) -> list[st
 
 
 def transcribe_audio(file_path: str) -> str:
-    """Transcribe the audio file using Groq's API."""
-    with open(file_path, "rb") as file:
-        transcription = groq_client.audio.transcriptions.create(
-            file=(file_path, file.read()),
-            model="whisper-large-v3",
-            response_format="text",
-            temperature=0.0,
-        )
-    return transcription
+    """Transcribe the audio file using Groq's API via HTTP requests."""
+    GROQ_API_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+    api_key = os.getenv("GROQ_API_KEY")
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    with open(file_path, "rb") as f:
+        files = {"file": (os.path.basename(file_path), f, "application/octet-stream")}
+        data = {"model": "whisper-large-v3", "response_format": "text", "temperature": 0.0}
+        response = requests.post(GROQ_API_URL, headers=headers, files=files, data=data)
+
+    if response.status_code != 200:
+        raise Exception(f"Groq API request failed with status {response.status_code}: {response.text}")
+
+    return response.text
 
 
-def improve_transcription(transcription: str) -> str:
-    """Improve the transcription using Groq's language model."""
-    prompt = f"""
-    Task: Improve the following transcription
-    Instructions:
-    1. Fix any grammatical or spelling errors
-    2. Improve readability and coherence
-    3. Maintain the original meaning and context
-    4. Use appropriate punctuation and formatting
-    5. Only return the improved text without any additional comments
+def improve_transcription_cerebras(transcription: str) -> str:
+    """Improve the transcription using the Cerebras API."""
+    api_key = os.getenv("CEREBRAS_API_KEY")
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
 
-    Original transcription:
-    {transcription}
+    prompt = f'''
+Task: Improve the following transcription
+Instructions:
+1. Fix any grammatical or spelling errors
+2. Improve readability and coherence
+3. Maintain the original meaning and context
+4. Use appropriate punctuation and formatting
+5. Only return the improved text without any additional comments
 
-    Improved transcription:
-    """
+Original transcription:
+{transcription}
 
-    completion = groq_client.chat.completions.create(
-        model="meta-llama/llama-4-maverick-17b-128e-instruct",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-    )
+Improved transcription:
+'''
+    payload = {
+        "model": CEREBRAS_MODEL,
+        "stream": False,
+        "temperature": 0.3,
+        "top_p": 1,
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant that improves transcriptions."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    response = requests.post(CEREBRAS_API_URL, headers=headers, json=payload)
+    if response.status_code != 200:
+        raise Exception(f"Cerebras API request failed with status {response.status_code}: {response.text}")
+    return response.json()['choices'][0]['message']['content']
 
-    return completion.choices[0].message.content
 
+def generate_summary_cerebras(transcription: str) -> str:
+    """Generate a summary of the transcription using the Cerebras API."""
+    api_key = os.getenv("CEREBRAS_API_KEY")
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
 
-def generate_summary(transcription: str) -> str:
-    """Generate a summary of the transcription using Groq's language model."""
-    prompt = f"""
-    Task: Summarize the following transcription
-    Instructions:
-    1. Provide a concise summary of the main points
-    2. Use bullet points for clarity
-    3. Write from the perspective of the transcript
-    4. Capture the key ideas and any important details
-    5. Ensure the summary is coherent and easy to understand
-    6. Use the same language that is used in the transcript (english, german, spanish, ...).
-    7. ONLY RETURN THE SUMMARY.
-    
-    Transcription:
-    {transcription}
+    prompt = f'''
+Task: Summarize the following transcription
+Instructions:
+1. Provide a concise summary of the main points
+2. Use bullet points for clarity
+3. Write from the perspective of the transcript
+4. Capture the key ideas and any important details
+5. Ensure the summary is coherent and easy to understand
+6. Use the same language that is used in the transcript (english, german, spanish, ...).
+7. ONLY RETURN THE SUMMARY.
 
-    Summary:
-    """
+Transcription:
+{transcription}
 
-    completion = groq_client.chat.completions.create(
-        model="meta-llama/llama-4-maverick-17b-128e-instruct",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.5,
-    )
-
-    return completion.choices[0].message.content
+Summary:
+'''
+    payload = {
+        "model": CEREBRAS_MODEL,
+        "stream": False,
+        "temperature": 0.5,
+        "top_p": 1,
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant that summarizes transcriptions."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    response = requests.post(CEREBRAS_API_URL, headers=headers, json=payload)
+    if response.status_code != 200:
+        raise Exception(f"Cerebras API request failed with status {response.status_code}: {response.text}")
+    return response.json()['choices'][0]['message']['content']
 
 
 async def process_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -136,12 +158,12 @@ async def process_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
 
         original_transcription = transcribe_audio(temp_file_path)
-        improved_transcription = improve_transcription(original_transcription)
+        improved_transcription = improve_transcription_cerebras(original_transcription)
 
         for part in split_message(improved_transcription):
             await update.message.reply_text(part, do_quote=True)
 
-        summary = generate_summary(improved_transcription)
+        summary = generate_summary_cerebras(improved_transcription)
         for part in split_message(summary):
             await update.message.reply_text(part, do_quote=True)
 
@@ -158,6 +180,8 @@ def main() -> None:
         raise ValueError("TELEGRAM_BOT_TOKEN is not set in the .env file")
     if not os.getenv("GROQ_API_KEY"):
         raise ValueError("GROQ_API_KEY is not set in the .env file")
+    if not os.getenv("CEREBRAS_API_KEY"):
+        raise ValueError("CEREBRAS_API_KEY is not set in the .env file")
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
