@@ -22,7 +22,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB in bytes
 MAX_MESSAGE_LENGTH = 4096
 CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
-CEREBRAS_MODEL = "llama-4-scout-17b-16e-instruct"
+CEREBRAS_MODEL = "qwen-3-32b"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -78,6 +78,7 @@ Improved transcription:
         "stream": False,
         "temperature": 0.3,
         "top_p": 1,
+        "max_completion_tokens": 8192,
         "messages": [
             {"role": "system", "content": "You are a helpful assistant that improves transcriptions."},
             {"role": "user", "content": prompt}
@@ -115,6 +116,7 @@ Summary:
         "stream": False,
         "temperature": 0.5,
         "top_p": 1,
+        "max_completion_tokens": 8192,
         "messages": [
             {"role": "system", "content": "You are a helpful assistant that summarizes transcriptions."},
             {"role": "user", "content": prompt}
