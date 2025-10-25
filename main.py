@@ -1,6 +1,6 @@
 import os
 import tempfile
-import requests # Added requests import
+import requests  # Added requests import
 from typing import Union
 from telegram import Update
 from telegram.ext import (
@@ -22,7 +22,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB in bytes
 MAX_MESSAGE_LENGTH = 4096
 CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
-CEREBRAS_MODEL = "qwen-3-32b"
+CEREBRAS_MODEL = "qwen-3-235b-a22b-thinking-2507"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -30,6 +30,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Welcome! Send me a voice message or an audio file (up to 25MB), and I'll transcribe, improve, and summarize it for you."
     )
+
+
+def remove_think_content(message: str) -> str:
+    """Remove content inside <think> text </think> tags and keep the rest."""
+    return message.split("</think>")[1].strip() if "</think>" in message else message
 
 
 def split_message(message: str, max_length: int = MAX_MESSAGE_LENGTH) -> list[str]:
@@ -45,11 +50,17 @@ def transcribe_audio(file_path: str) -> str:
 
     with open(file_path, "rb") as f:
         files = {"file": (os.path.basename(file_path), f, "application/octet-stream")}
-        data = {"model": "whisper-large-v3", "response_format": "text", "temperature": 0.0}
+        data = {
+            "model": "whisper-large-v3",
+            "response_format": "text",
+            "temperature": 0.0,
+        }
         response = requests.post(GROQ_API_URL, headers=headers, files=files, data=data)
 
     if response.status_code != 200:
-        raise Exception(f"Groq API request failed with status {response.status_code}: {response.text}")
+        raise Exception(
+            f"Groq API request failed with status {response.status_code}: {response.text}"
+        )
 
     return response.text
 
@@ -59,7 +70,7 @@ def improve_transcription_cerebras(transcription: str) -> str:
     api_key = os.getenv("CEREBRAS_API_KEY")
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
 
-    prompt = f'''
+    prompt = f"""
 Task: Improve the following transcription
 Instructions:
 1. Fix any grammatical or spelling errors
@@ -72,22 +83,25 @@ Original transcription:
 {transcription}
 
 Improved transcription:
-'''
+"""
     payload = {
         "model": CEREBRAS_MODEL,
         "stream": False,
-        "temperature": 0.3,
         "top_p": 1,
-        "max_completion_tokens": 8192,
         "messages": [
-            {"role": "system", "content": "You are a helpful assistant that improves transcriptions."},
-            {"role": "user", "content": prompt}
-        ]
+            {
+                "role": "system",
+                "content": "You are a helpful assistant that improves transcriptions.",
+            },
+            {"role": "user", "content": prompt},
+        ],
     }
     response = requests.post(CEREBRAS_API_URL, headers=headers, json=payload)
     if response.status_code != 200:
-        raise Exception(f"Cerebras API request failed with status {response.status_code}: {response.text}")
-    return response.json()['choices'][0]['message']['content']
+        raise Exception(
+            f"Cerebras API request failed with status {response.status_code}: {response.text}"
+        )
+    return response.json()["choices"][0]["message"]["content"]
 
 
 def generate_summary_cerebras(transcription: str) -> str:
@@ -95,7 +109,7 @@ def generate_summary_cerebras(transcription: str) -> str:
     api_key = os.getenv("CEREBRAS_API_KEY")
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
 
-    prompt = f'''
+    prompt = f"""
 Task: Summarize the following transcription
 Instructions:
 1. Provide a concise summary of the main points
@@ -110,22 +124,25 @@ Transcription:
 {transcription}
 
 Summary:
-'''
+"""
     payload = {
         "model": CEREBRAS_MODEL,
         "stream": False,
-        "temperature": 0.5,
         "top_p": 1,
-        "max_completion_tokens": 8192,
         "messages": [
-            {"role": "system", "content": "You are a helpful assistant that summarizes transcriptions."},
-            {"role": "user", "content": prompt}
-        ]
+            {
+                "role": "system",
+                "content": "You are a helpful assistant that summarizes transcriptions.",
+            },
+            {"role": "user", "content": prompt},
+        ],
     }
     response = requests.post(CEREBRAS_API_URL, headers=headers, json=payload)
     if response.status_code != 200:
-        raise Exception(f"Cerebras API request failed with status {response.status_code}: {response.text}")
-    return response.json()['choices'][0]['message']['content']
+        raise Exception(
+            f"Cerebras API request failed with status {response.status_code}: {response.text}"
+        )
+    return response.json()["choices"][0]["message"]["content"]
 
 
 async def process_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -161,11 +178,13 @@ async def process_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         original_transcription = transcribe_audio(temp_file_path)
         improved_transcription = improve_transcription_cerebras(original_transcription)
+        improved_transcription = remove_think_content(improved_transcription)
 
         for part in split_message(improved_transcription):
             await update.message.reply_text(part, do_quote=True)
 
         summary = generate_summary_cerebras(improved_transcription)
+        summary = remove_think_content(summary)
         for part in split_message(summary):
             await update.message.reply_text(part, do_quote=True)
 
