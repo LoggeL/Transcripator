@@ -22,7 +22,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB in bytes
 MAX_MESSAGE_LENGTH = 4096
 CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
-CEREBRAS_MODEL = "qwen-3-235b-a22b-thinking-2507"
+CEREBRAS_MODEL = "gpt-oss-120b"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
