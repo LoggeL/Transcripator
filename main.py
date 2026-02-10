@@ -1,6 +1,8 @@
 import os
+import asyncio
+import logging
 import tempfile
-import requests  # Added requests import
+import requests
 from typing import Union
 from telegram import Update
 from telegram.ext import (
@@ -10,7 +12,14 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
+from telegram.request import HTTPXRequest
 from dotenv import load_dotenv
+
+# Set up logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -145,16 +154,43 @@ Summary:
     return response.json()["choices"][0]["message"]["content"]
 
 
+async def get_file_with_retry(telegram_obj, max_retries=3, base_delay=2):
+    """Get a Telegram file with retry logic for transient timeouts."""
+    for attempt in range(max_retries):
+        try:
+            return await telegram_obj.get_file()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning(f"get_file() attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+            await asyncio.sleep(delay)
+
+
+async def download_with_retry(file, custom_path, max_retries=3, base_delay=2):
+    """Download a file with retry logic for transient timeouts."""
+    for attempt in range(max_retries):
+        try:
+            await file.download_to_drive(custom_path=custom_path)
+            return
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning(f"download_to_drive() attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+            await asyncio.sleep(delay)
+
+
 async def process_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process the incoming audio file or voice message."""
-    file: Union[None, "telegram.File"] = None
+    file = None
     file_extension = ""
 
     if update.message.voice:
-        file = await update.message.voice.get_file()
+        file = await get_file_with_retry(update.message.voice)
         file_extension = ".ogg"
     elif update.message.audio:
-        file = await update.message.audio.get_file()
+        file = await get_file_with_retry(update.message.audio)
         file_extension = os.path.splitext(update.message.audio.file_name)[1]
 
     if not file:
@@ -168,7 +204,7 @@ async def process_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as temp_file:
-        await file.download_to_drive(custom_path=temp_file.name)
+        await download_with_retry(file, custom_path=temp_file.name)
         temp_file_path = temp_file.name
 
     try:
@@ -189,10 +225,18 @@ async def process_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text(part, do_quote=True)
 
     except Exception as e:
+        logger.error(f"Error processing audio: {e}")
         await update.message.reply_text(f"An error occurred: {str(e)}")
 
     finally:
         os.unlink(temp_file_path)
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Global error handler that logs errors and notifies the user."""
+    logger.error(f"Exception while handling an update: {context.error}")
+    if update and hasattr(update, "message") and update.message:
+        await update.message.reply_text("Sorry, something went wrong. Please try again.")
 
 
 def main() -> None:
@@ -204,12 +248,22 @@ def main() -> None:
     if not os.getenv("CEREBRAS_API_KEY"):
         raise ValueError("CEREBRAS_API_KEY is not set in the .env file")
 
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    request = HTTPXRequest(
+        read_timeout=60, write_timeout=60, connect_timeout=30, pool_timeout=30
+    )
+    application = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .request(request)
+        .get_updates_request(HTTPXRequest(read_timeout=60))
+        .build()
+    )
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(
         MessageHandler(filters.VOICE | filters.AUDIO, process_audio)
     )
+    application.add_error_handler(error_handler)
 
     application.run_polling()
 
