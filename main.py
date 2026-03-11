@@ -30,8 +30,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 # Constants
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB in bytes
 MAX_MESSAGE_LENGTH = 4096
-CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
-CEREBRAS_MODEL = "gpt-oss-120b"
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODEL = "google/gemini-3.1-flash-lite"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -74,13 +74,31 @@ def transcribe_audio(file_path: str) -> str:
     return response.text
 
 
-def improve_transcription_cerebras(transcription: str) -> str:
-    """Improve the transcription using the Cerebras API."""
-    api_key = os.getenv("CEREBRAS_API_KEY")
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+def call_openrouter(system_prompt: str, user_prompt: str) -> str:
+    """Call OpenRouter API with the configured model."""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+    response = requests.post(OPENROUTER_API_URL, headers=headers, json=payload)
+    if response.status_code != 200:
+        raise Exception(
+            f"OpenRouter API request failed with status {response.status_code}: {response.text}"
+        )
+    return response.json()["choices"][0]["message"]["content"]
 
-    prompt = f"""
-Task: Improve the following transcription
+
+def improve_transcription_cerebras(transcription: str) -> str:
+    """Improve the transcription using OpenRouter / Gemini Flash Lite."""
+    prompt = f"""Task: Improve the following transcription
 Instructions:
 1. Fix any grammatical or spelling errors
 2. Improve readability and coherence
@@ -91,35 +109,15 @@ Instructions:
 Original transcription:
 {transcription}
 
-Improved transcription:
-"""
-    payload = {
-        "model": CEREBRAS_MODEL,
-        "stream": False,
-        "top_p": 1,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant that improves transcriptions.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-    }
-    response = requests.post(CEREBRAS_API_URL, headers=headers, json=payload)
-    if response.status_code != 200:
-        raise Exception(
-            f"Cerebras API request failed with status {response.status_code}: {response.text}"
-        )
-    return response.json()["choices"][0]["message"]["content"]
+Improved transcription:"""
+    return call_openrouter(
+        "You are a helpful assistant that improves transcriptions.", prompt
+    )
 
 
 def generate_summary_cerebras(transcription: str) -> str:
-    """Generate a summary of the transcription using the Cerebras API."""
-    api_key = os.getenv("CEREBRAS_API_KEY")
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-
-    prompt = f"""
-Task: Summarize the following transcription
+    """Generate a summary of the transcription using OpenRouter / Gemini Flash Lite."""
+    prompt = f"""Task: Summarize the following transcription
 Instructions:
 1. Provide a concise summary of the main points
 2. Use bullet points for clarity
@@ -132,26 +130,10 @@ Instructions:
 Transcription:
 {transcription}
 
-Summary:
-"""
-    payload = {
-        "model": CEREBRAS_MODEL,
-        "stream": False,
-        "top_p": 1,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant that summarizes transcriptions.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-    }
-    response = requests.post(CEREBRAS_API_URL, headers=headers, json=payload)
-    if response.status_code != 200:
-        raise Exception(
-            f"Cerebras API request failed with status {response.status_code}: {response.text}"
-        )
-    return response.json()["choices"][0]["message"]["content"]
+Summary:"""
+    return call_openrouter(
+        "You are a helpful assistant that summarizes transcriptions.", prompt
+    )
 
 
 async def get_file_with_retry(telegram_obj, max_retries=3, base_delay=2):
@@ -245,8 +227,8 @@ def main() -> None:
         raise ValueError("TELEGRAM_BOT_TOKEN is not set in the .env file")
     if not os.getenv("GROQ_API_KEY"):
         raise ValueError("GROQ_API_KEY is not set in the .env file")
-    if not os.getenv("CEREBRAS_API_KEY"):
-        raise ValueError("CEREBRAS_API_KEY is not set in the .env file")
+    if not os.getenv("OPENROUTER_API_KEY"):
+        raise ValueError("OPENROUTER_API_KEY is not set in the .env file")
 
     request = HTTPXRequest(
         read_timeout=60, write_timeout=60, connect_timeout=30, pool_timeout=30
