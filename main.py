@@ -30,7 +30,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB
 MAX_MESSAGE_LENGTH = 4096
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL = "google/gemini-3-flash-preview"
+OPENROUTER_MODEL = "meta/muse-spark-1.3-contributor"
 GROQ_API_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_MAX_FILE_SIZE = 24 * 1024 * 1024  # 24MB
 
