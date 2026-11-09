@@ -1,7 +1,7 @@
 """Telegram audio transcription bot (Transcripator).
 
 Pipeline lives in pipeline.py (shared with the web version, web.py):
-Groq Whisper transcribes, OpenRouter (Muse Ember) improves + summarizes.
+Ember transcribes audio directly, then improves + summarizes it.
 """
 
 import asyncio

@@ -11,7 +11,7 @@ import tempfile
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from pipeline import GROQ_MODEL, OPENROUTER_MODEL, missing_keys, process_transcription
+from pipeline import GROQ_MODEL, OPENROUTER_MODEL, has_groq, missing_keys, process_transcription
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def health() -> dict:
     return {
         "ok": True,
         "missing_keys": missing_keys(),
-        "models": {"groq": GROQ_MODEL, "openrouter": OPENROUTER_MODEL},
+        "models": {"openrouter": OPENROUTER_MODEL, "groq_fallback": GROQ_MODEL if has_groq() else None},
     }
 
 

@@ -2,18 +2,22 @@
 
 Audio transcription as Telegram bot **and** web version, sharing one pipeline:
 
-1. **Groq Whisper** transcribes the audio.
-2. **OpenRouter** improves the transcript (grammar, punctuation, readability).
-3. **OpenRouter** summarizes it (bullet points, same language).
+1. **Ember** (`meta/muse-ember` via OpenRouter) transcribes the audio directly
+   (Responses API, `input_audio`).
+2. **Ember** improves the transcript (grammar, punctuation, readability).
+3. **Ember** summarizes it (bullet points, same language).
+
+> No Groq required. Optional: set `GROQ_API_KEY` for a Whisper fallback
+> (`whisper-large-v3`) if the Ember audio call fails.
 
 ## Models (Nov 2026)
 
 | Step | Default | Env override | Notes |
 |---|---|---|---|
-| Transcription (Groq) | `whisper-large-v3` | `GROQ_MODEL` | Best accuracy on Groq (~10.3% WER). `whisper-large-v3-turbo` is cheaper/faster ($0.04 vs $0.111/hr, 216x speed) but less accurate (~12% WER). |
-| Improve + summary (OpenRouter) | `meta/muse-ember` | `OPENROUTER_MODEL` | Meta's Nov-2026 extraction/rewrite model; replaces `meta/muse-spark-1.3-contributor`. |
+| Transcription, improve, summary | `meta/muse-ember` | `OPENROUTER_MODEL` | Meta's Nov-2026 model with audio input. Replaces `muse-spark-1.3-contributor` + separate Whisper. |
+| Fallback only (Groq) | `whisper-large-v3` | `GROQ_MODEL`, `GROQ_API_KEY` | Only used when the Ember audio call fails. |
 
-Both keys required: `GROQ_API_KEY`, `OPENROUTER_API_KEY` (see `.env.example`).
+Required key: `OPENROUTER_API_KEY` (see `.env.example`).
 The bot additionally needs `TELEGRAM_BOT_TOKEN`.
 
 ## Setup
@@ -23,7 +27,8 @@ cp .env.example .env   # then fill in your keys
 uv sync                # or: pip install -r requirements.txt
 ```
 
-Requires Python 3.12+ and (only for uploads > 24 MB) `ffmpeg`/`ffprobe`.
+Requires Python 3.12+ and `ffmpeg` (converts `.ogg` etc. to MP3 for the
+Responses API, and for the Groq fallback).
 
 ## Telegram bot
 
@@ -49,7 +54,7 @@ For the web version, override the command to `python web.py`.
 
 ## Code overview
 
-- `pipeline.py`: shared pipeline (Groq transcription, OpenRouter polish, `process_transcription`).
+- `pipeline.py`: shared pipeline (`transcribe_with_ember`, Groq fallback, `process_transcription`).
 - `main.py`: Telegram bot (thin wrapper around `pipeline`).
 - `web.py`: FastAPI web version (thin wrapper around `pipeline`).
 - `test_pipeline.py`: mocked tests, no API keys needed (`python -m unittest`).

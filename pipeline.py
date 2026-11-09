@@ -1,17 +1,18 @@
-"""Shared transcription pipeline: Groq Whisper -> OpenRouter polish.
+"""Shared transcription pipeline (Ember direct audio -> polish).
 
-Used by both the Telegram bot (main.py) and the web version (web.py).
-Models are configurable via environment variables; defaults are the
-latest approved IDs as of 2026-11:
+Primary path: Ember hears the audio directly via OpenRouter's Responses API
+(input_audio, base64). No Groq needed. If Ember fails and GROQ_API_KEY is
+set, Groq Whisper is used as fallback.
 
-- GROQ_MODEL (default "whisper-large-v3"): best-accuracy Whisper on Groq.
-  "whisper-large-v3-turbo" is cheaper/faster (~12% vs 10.3% WER).
-- OPENROUTER_MODEL (default "meta/muse-ember"): Meta's Nov-2026 text
-  model for extraction/rewrite tasks, replaces muse-spark-1.3-contributor.
+Models (overridable via env):
+- OPENROUTER_MODEL (default "meta/muse-ember"): audio + text.
+- GROQ_MODEL (default "whisper-large-v3"): fallback only.
 """
 
+import base64
 import logging
 import os
+import subprocess
 
 import requests
 from dotenv import load_dotenv
@@ -27,6 +28,7 @@ load_dotenv()
 MAX_MESSAGE_LENGTH = 4096
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_RESPONSES_URL = "https://openrouter.ai/api/v1/responses"
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta/muse-ember")
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -35,16 +37,119 @@ GROQ_MAX_FILE_SIZE = 24 * 1024 * 1024  # 24MB
 
 
 def missing_keys() -> list[str]:
-    """Return required API keys that are not set."""
-    return [k for k in ("OPENROUTER_API_KEY", "GROQ_API_KEY") if not os.getenv(k)]
+    """Return required API keys that are not set.
+
+    Only OpenRouter is required now (Ember does audio directly).
+    Groq is optional (fallback only).
+    """
+    return [k for k in ("OPENROUTER_API_KEY",) if not os.getenv(k)]
+
+
+def has_groq() -> bool:
+    return bool(os.getenv("GROQ_API_KEY"))
 
 
 def split_message(message: str, max_length: int = MAX_MESSAGE_LENGTH) -> list[str]:
     return [message[i : i + max_length] for i in range(0, len(message), max_length)]
 
 
+def _responses_text(data: dict) -> str:
+    """Extract transcript text from a Responses API payload."""
+    if data.get("output_text"):
+        return str(data["output_text"]).strip()
+    for item in data.get("output", []):
+        for content in item.get("content", []):
+            if content.get("type") == "output_text" and content.get("text"):
+                return str(content["text"]).strip()
+    raise Exception(f"OpenRouter Responses API: no text in response: {data!r}")
+
+
+def _prepare_audio(file_path: str) -> tuple[str, str]:
+    """Return (path, format) suitable for the Responses API (wav/mp3 only).
+
+    Ogg/other uploads are converted to 16 kHz mono MP3 via ffmpeg.
+    """
+    ext = os.path.splitext(file_path)[1].lower().lstrip(".")
+    if ext in ("wav", "mp3"):
+        return file_path, ext
+    converted = file_path + "_ember.mp3"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-i", file_path, "-vn", "-ac", "1", "-ar", "16000",
+             "-codec:a", "libmp3lame", "-b:a", "64k", "-y", converted],
+            capture_output=True, text=True, timeout=300, check=True,
+        )
+    except Exception as e:
+        if os.path.exists(converted):
+            os.unlink(converted)
+        raise Exception(f"Audio conversion for Ember failed (ffmpeg?): {e}")
+    return converted, "mp3"
+
+
+def transcribe_with_ember(file_path: str) -> str:
+    """Transcribe audio by sending it directly to Ember (OpenRouter)."""
+    audio_path = file_path
+    fmt = "wav"
+    try:
+        audio_path, fmt = _prepare_audio(file_path)
+        with open(audio_path, "rb") as f:
+            audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+    finally:
+        if audio_path != file_path and os.path.exists(audio_path):
+            os.unlink(audio_path)
+
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "Transcribe this audio exactly as spoken. "
+                        "Return ONLY the transcript, no commentary.",
+                    },
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": audio_b64, "format": fmt},
+                    },
+                ],
+            }
+        ],
+    }
+    response = requests.post(
+        OPENROUTER_RESPONSES_URL, headers=headers, json=payload, timeout=180
+    )
+    if response.status_code != 200:
+        raise Exception(
+            f"OpenRouter Responses API failed ({response.status_code}): {response.text}"
+        )
+    try:
+        return _responses_text(response.json())
+    except Exception as e:
+        if "no text in response" in str(e):
+            raise
+        raise Exception(f"OpenRouter Responses API bad response: {e}")
+
+
+def transcribe_audio(file_path: str) -> str:
+    """Ember primary, Groq fallback (only if GROQ_API_KEY is set)."""
+    try:
+        return transcribe_with_ember(file_path)
+    except Exception as e:
+        if not has_groq():
+            raise
+        logger.warning(f"Ember transcription failed ({e}); falling back to Groq Whisper.")
+        return transcribe_with_groq(file_path)
+
+
 def call_openrouter_text(system_prompt: str, user_prompt: str) -> str:
-    """Text-only call via OpenRouter (current model: Muse Ember)."""
+    """Text-only call via OpenRouter Chat Completions (Ember)."""
     api_key = os.getenv("OPENROUTER_API_KEY")
     headers = {
         "Content-Type": "application/json",
@@ -84,9 +189,7 @@ def summarize_transcription(improved: str) -> str:
 
 
 def transcribe_with_groq(file_path: str) -> str:
-    """Transcribe audio using Groq Whisper (see GROQ_MODEL)."""
-    import subprocess
-
+    """Transcribe audio using Groq Whisper (fallback only)."""
     compressed = file_path
     if os.path.getsize(file_path) > GROQ_MAX_FILE_SIZE:
         try:
@@ -122,7 +225,7 @@ def transcribe_with_groq(file_path: str) -> str:
 
 def process_transcription(file_path: str) -> dict:
     """Run the full pipeline: transcribe, improve, summarize."""
-    raw = transcribe_with_groq(file_path)
+    raw = transcribe_audio(file_path)
     improved = improve_transcription(raw)
     summary = summarize_transcription(improved)
     return {"raw": raw, "improved": improved, "summary": summary}
