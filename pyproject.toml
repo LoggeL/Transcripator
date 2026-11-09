@@ -1,11 +1,14 @@
 [project]
 name = "transcripator"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Telegram + web audio transcription bot (Groq Whisper + OpenRouter)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "python-dotenv>=1.1.1",
     "python-telegram-bot>=22.5",
     "requests>=2.32.5",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "python-multipart>=0.0.9",
 ]
